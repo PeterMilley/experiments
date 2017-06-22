@@ -2,6 +2,8 @@
 {-# LANGUAGE TupleSections #-}
 module Control.ReverseState
   ( RStateT(..)
+  , evalRStateT
+  , execRStateT
   , rstate, rget, rput, rmodify
   , RState(..)
   , runRState
@@ -47,6 +49,7 @@ first argument to the helper function @go@:
 -}
 
 import Control.Arrow (first)
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Fix
 import Control.Monad.Identity
@@ -59,6 +62,14 @@ newtype RStateT s m a =
   RStateT { -- | Run the underlying state computation.
             runRStateT :: s -> m (a, s)
           }
+          
+-- | Run the state computation, keeping only the final value.
+evalRStateT :: Functor m => RStateT s m a -> s -> m a
+evalRStateT m s = fst <$> runRStateT m s
+
+-- | Run the state computation, keeping only the final state.
+execRStateT :: Functor m => RStateT s m a -> s -> m s
+execRStateT m s = snd <$> runRStateT m s
 
 instance Functor m => Functor (RStateT s m) where
   fmap f m = RStateT (\s -> first f <$> runRStateT m s)
