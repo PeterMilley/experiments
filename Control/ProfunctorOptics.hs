@@ -87,7 +87,7 @@ review o b = unTagged $ o (Tagged b)
 newtype Forget r a b = Forget { runForget :: a -> r }
 
 -- | 'foldMapOf' aggregates all instances of the smaller type
---   by mapping them to another type 'r'. Typically 'r' is a Monoid.
+--   by mapping them to another type @r@. Typically @r@ is a Monoid.
 foldMapOf :: Optic (Forget r) s t a b -> (a -> r) -> s -> r
 foldMapOf o p = runForget $ o (Forget p)
 
@@ -123,7 +123,7 @@ traverseOf = withStar
 
 -- Optic types
 
--- | 'Equality' denotes that s=a and t=b.
+-- | 'Equality' denotes that @s=a@ and @t=b@.
 --   'Equality' supports all above functions, trivially.
 type Equality s t a b = forall p . Optic p s t a b
 
@@ -135,8 +135,8 @@ eq = id
 class Profunctor p where
   dimap :: (s -> a) -> (b -> t) -> p a b -> p s t
 
--- | 'Iso' denotes that 's' is isomorphic to 'a' and 't' is isomorphic
---   to 'b'. (Note the only proper 'Iso's are simple ones.)
+-- | 'Iso' denotes that @s@ is isomorphic to @a@ and @t@ is isomorphic
+--   to @b@. (Note the only proper 'Iso's are simple ones.)
 --   'Iso' supports all the above operations, trivially.
 type Iso s t a b = forall p . Profunctor p => Optic p s t a b
 
@@ -165,7 +165,7 @@ class Profunctor p => Strong p where
   second' :: p a b -> p (c, a) (c, b)
   second' = dimap swap swap . first'
 
--- | A 'Lens' denotes that 's'=='(a,c)' and 't'=='(b,c)' for some 'c'.
+-- | A 'Lens' denotes that @s==(a,c)@ and @t==(b,c)@ for some @c@.
 --   'Lens' supports all operations except 'review'.
 type Lens s t a b = forall p . Strong p => Optic p s t a b
 
@@ -174,9 +174,16 @@ elens :: (s -> (a, c)) -> ((b, c) -> t) -> Lens s t a b
 elens getter setter = dimap getter setter . first'
 
 -- | Construct a 'Lens' from explicit getters and setters, without
---   referring to the type 'c'.
+--   referring to the type @c@.
 lens :: (s -> a) -> (b -> s -> t) -> Lens s t a b
 lens getter setter = dimap (getter &&& id) (uncurry setter) . first'
+
+-- | Construct a profunctor 'Lens' from a van Laarhoven-style lens function.
+vlens :: (forall f . Functor f => (a -> f b) -> s -> f t) -> Lens s t a b
+vlens v = lens getter setter
+  where
+    getter s   = getConst $ v Const s
+    setter b s = runIdentity $ v (Identity . const b) s
 
 -- | A 'Lens' which picks out the first member of a tuple.
 _1 :: Lens (a, c) (b, c) a b
@@ -209,8 +216,8 @@ class Profunctor p => Choice p where
   left' :: p a b -> p (Either a c) (Either b c)
   left' = dimap swapE swapE . right'
 
--- | A 'Prism' denotes that 's'=='Either c a', 't'=='Either c b' for some 'c'.
---   'Prism' supports all operations except 'view'; 'r' must be a Monoid for
+-- | A 'Prism' denotes that @s==Either c a@, @t==Either c b@ for some @c@.
+--   'Prism' supports all operations except 'view'; @r@ must be a Monoid for
 --   'foldMapOf' to be supported.
 type Prism s t a b = forall p . Choice p => Optic p s t a b
 
@@ -219,7 +226,7 @@ eprism :: (s -> Either c a) -> (Either c b -> t) -> Prism s t a b
 eprism match build = dimap match build . right'
 
 -- | Construct a 'Prism' from a matcher and a reviewer, without referring
---   to 'c'.
+--   to @c@.
 prism :: (s -> Either t a) -> (b -> t) -> Prism s t a b
 prism match build = dimap match (either id build) . right'
 
@@ -262,8 +269,8 @@ instance Applicative f => Choice (Star f) where
 class Bifunctor p where
   bimap :: (a -> s) -> (b -> t) -> p a b -> p s t
 
--- | A 'Review' denotes that 't' can be constructed from 'b'.
---   Review only supports 'review'.
+-- | A 'Review' denotes that @t@ can be constructed from @b@.
+--   'Review' only supports 'review'.
 type Review t b = forall p . (Choice p, Bifunctor p) => Optic' p t b
 
 -- | Construct a 'Review' from an explicit function.
@@ -277,7 +284,7 @@ instance Bifunctor Tagged where
 class Bicontravariant p where
   cimap :: (s -> a) -> (t -> b) -> p a b -> p s t
 
--- | A 'Getter' denotes that 's' contains an 'a'.
+-- | A 'Getter' denotes that @s@ contains an @a@.
 --   'Getter' supports 'view' and 'preview'.
 type Getter s a = forall p . (Strong p, Bicontravariant p) => Optic' p s a
 
@@ -304,7 +311,7 @@ type Traversal s t a b = forall p . Traversing p => Optic p s t a b
 
 -- | Construct a 'Traversal' from an explicit function.
 --   'Traversal' supports every operation except 'view' and 'review';
---   'foldMapOf' requires 'r' to be a Monoid.
+--   'foldMapOf' requires @r@ to be a Monoid.
 traversing :: (forall f . Applicative f => (a -> f b) -> s -> f t)
            -> Traversal s t a b
 traversing = wander
@@ -322,8 +329,8 @@ instance Applicative f => Traversing (Star f) where
 
 -- (Traversing + Bicontravariant) and Fold
 
--- | A 'Fold' denotes that 's' contains 0 or more instances of 'a'.
--- | 'Fold' supports 'toListOf', and 'foldMapOf' when 'r' is a Monoid.
+-- | A 'Fold' denotes that @s@ contains 0 or more instances of @a@.
+-- | 'Fold' supports 'toListOf', and 'foldMapOf' when @r@ is a Monoid.
 type Fold s a = forall p . (Traversing p, Bicontravariant p) => Optic' p s a
 
 -- | Construct a 'Fold' from an explicit map to a 'Foldable' type.
@@ -346,7 +353,7 @@ data Context s a x = Context (a -> x) s deriving Functor
 setting :: ((a -> b) -> s -> t) -> Setter s t a b
 setting f = dimap (Context id) (\(Context g s) -> f g s) . map'
 
--- | A setter for functor types. 'over mapped' == 'fmap'.
+-- | A setter for functor types. @over mapped == fmap@.
 mapped :: Functor f => Setter (f a) (f b) a b
 mapped = setting fmap
 
