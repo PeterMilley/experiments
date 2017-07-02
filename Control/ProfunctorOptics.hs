@@ -20,6 +20,7 @@ module Control.ProfunctorOptics
   , Lens(..)
   , elens
   , lens
+  , vlens
   , _1
   , _2
   , Prism(..)
