@@ -302,7 +302,7 @@ instance Bicontravariant (ForgetM r) where
 class (Strong p, Choice p) => Traversing p where
   wander :: (forall f . Applicative f => (a -> f b) -> s -> f t)
          -> p a b -> p s t
-  -- | Contruct a 'Traversal' from a 'Traversable functor.
+  -- | Contruct a 'Traversal' from a 'Traversable' functor.
   traverse' :: Traversable g => p a b -> p (g a) (g b)
   traverse' = wander traverse
 
