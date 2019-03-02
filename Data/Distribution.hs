@@ -28,7 +28,7 @@ E.g.
 -}
 
 import Control.Monad (liftM2)
-import Control.Monad.Free
+import Control.Monad.Free.Church
 import Control.Monad.State
 import Data.Functor ((<$>))
 import System.Random
@@ -36,7 +36,7 @@ import System.Random
 -- | @Distribution a o@ is a collection of type @o@ which can depend on random
 --   variables of type @a@. Typically @a@ will be 'Float' or 'Double'.
 --   'Distribution' is defined as a free monad (and hence is a monad).
-type Distribution a = Free (D a)
+type Distribution a = F (D a)
 
 data D a o = Disjoint a o o
            | Independent [o]
@@ -55,16 +55,6 @@ independent events = wrap (Independent events)
 -- | @uniform (\p -> x)@ represents @x@ with @p@ chosen uniformly between 0 and 1.
 uniform :: MonadFree (D a) m => (a -> m o) -> m o
 uniform f = wrap (Uniform f)
-
--- | Compute the expected value of a 'Distribution'. This will fail to terminate
---   if the input is infinite; use 'Control.Monad.Free.cutoff' first in that
---   case to approximate the input with something finite instead.
-expectation :: Fractional a => Distribution a a -> a
-expectation = iter c
-  where
-    c (Disjoint p left right) = p * left + (1-p) * right
-    c (Independent events)    = sum events
-    c (Uniform f)             = f 0.5
 
 -- | Use the given random number generator @g@ to eliminate all of the random
 --   variables in a @Distribution@, flattening the remaining elements into a
