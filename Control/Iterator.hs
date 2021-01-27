@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Control.Iterator
   ( Yieldable(..)
@@ -21,7 +22,7 @@ module Control.Iterator
 Module      : Control.Iterator
 Description : Co-operative asymmetric co-routines.
 
-This is a co-routine implementation based on Edward Kmett's "Free Monads for
+This is a co-routine implementation based on Edward Kmett's "Yield Monads for
 Less" series of blog posts, specifically the third. 'YieldT' and 'IteratorT'
 are both free monad transformers which extend their inner monad with the
 'yield' method:
@@ -44,12 +45,8 @@ concern, construct your co-routines as 'IteratorT' and then convert to
 'YieldT' before first use.
 -}
 
+import Control.Monad (ap)
 import Control.Monad.Identity
-import Control.Monad.Trans.Free
-import Control.Monad.Trans.Free.Church
-
-data Store i o r = Store (i -> r) o
-    deriving (Functor)
 
 -- | A typeclass for functors which can suspend computation, yielding a value
 --   of type @o@, and wait to be resumed with a value of type @i@. Both
@@ -57,54 +54,87 @@ data Store i o r = Store (i -> r) o
 class Functor y => Yieldable y i o | y -> i o where
    yield :: o -> y i
 
-instance Yieldable (Store i o) i o where
-  yield = Store id
-
 -- | A monad transformer which makes its inner monad 'Yieldable'.
-type YieldT i o m = FreeT (Store i o) m
+data YieldF i o a b = Pure a | Yield (i -> b) o
+newtype YieldT i o m a = YieldT { runYieldT :: m (YieldF i o a (YieldT i o m a)) }
 type Yield i o = YieldT i o Identity
 
-instance (Yieldable y i o, Monad m) => Yieldable (FreeT y m) i o where
-  yield = liftF . yield
+instance Monad m => Functor (YieldT i o m) where
+  fmap f (YieldT m) = YieldT (liftM f' m) where
+    f' (Pure a)     = Pure (f a)
+    f' (Yield ki o) = Yield ((fmap f) . ki) o
 
--- | Another monad transformer which makes its inner monad 'Yieldable',
---   but using Church-encoded free monads (i.e. continuations, lots of
---   continuations).
-type IteratorT i o m = FT (Store i o) m
-type Iterator i o = IteratorT i o Identity
+instance Monad m => Yieldable (YieldT i o m) i o where
+  yield = YieldT . return . Yield return
 
-instance (Yieldable y i o, Monad m) => Yieldable (FT y m) i o where
-  yield = liftF . yield
+instance Monad m => Applicative (YieldT i o m) where
+  pure a = YieldT (return (Pure a))
+  (<*>) = ap
 
--- | Convert an 'IteratorT' to a 'YieldT'.
-toYield :: Monad m => IteratorT i o m a -> YieldT i o m a
-toYield = fromFT
-
--- | Convert a 'YieldT' to an 'IteratorT'.
-toIterator :: Monad m => YieldT i o m a -> IteratorT i o m a
-toIterator = toFT
+instance Monad m => Monad (YieldT i o m) where
+  return = pure
+  YieldT m >>= f = YieldT $ m >>= \v -> case v of
+    Pure a     -> runYieldT (f a)
+    Yield ki o -> return (Yield ((>>= f) . ki) o)
 
 -- | Perform a single step of a 'YieldT', returning 'Either' the final
 --   value of the computation, or an intermediate value and a continuation
 --   to resume the computation.
 stepM :: Monad m => YieldT i o m a -> m (Either a (o, i -> YieldT i o m a))
 stepM y = do
-  x <- runFreeT y
+  x <- runYieldT y
   case x of
-    Pure a            -> return $ Left a
-    Free (Store ki o) -> return $ Right (o, ki)
+    Pure a     -> return $ Left a
+    Yield ki o -> return $ Right (o, ki)
 
 step :: Yield i o a -> Either a (o, i -> Yield i o a)
 step = runIdentity . stepM
+
+-- | Another monad transformer which makes its inner monad 'Yieldable',
+--   but using Church-encoded free monads (i.e. continuations, lots of
+--   continuations).
+newtype IteratorT i o m a =
+  IteratorT { runIteratorT
+              :: forall r. (a -> m r)
+              -> (o -> (i -> m r) -> m r)
+              -> m r }
+type Iterator i o = IteratorT i o Identity
+
+instance Functor (IteratorT i o m) where
+  fmap f (IteratorT k) = IteratorT $ \a fr -> k (a . f) fr
+
+instance Monad m => Yieldable (IteratorT i o m) i o where
+  yield o = IteratorT (\kp kf -> kf o kp)
+
+instance Applicative (IteratorT i o m) where
+  pure a = IteratorT $ \k _ -> k a
+  IteratorT fk <*> IteratorT ak = IteratorT $ \b fr -> fk (\e -> ak (\d -> b (e d)) fr) fr
+
+instance Monad (IteratorT i o m) where
+  return = pure
+  IteratorT fk >>= f = IteratorT $ \b fr -> fk (\d -> runIteratorT (f d) b fr) fr
 
 -- | Run an 'IteratorT' to completion by giving it two continuations, one
 --   for what to do with the final value and one for what to do with both
 --   an intermediate value and a `resume` continuation.
 runIteratorM :: Monad m => IteratorT i o m a
              -> (a -> m r) -> (o -> (i -> m r) -> m r) -> m r
-runIteratorM (FT m) =
-  \ka kf -> m ka (\xg -> (\ (Store ki o) -> kf o ki) . (fmap xg))
+runIteratorM = runIteratorT
 
 runIterator :: Iterator i o a -> (a -> r) -> (o -> (i -> r) -> r) -> r
-runIterator (FT m) =
-  \ka kf -> runIdentity $ m (return . ka) (\xg -> return . (\ (Store ki o) -> kf o (runIdentity . ki)) . (fmap xg))
+runIterator (IteratorT m) =
+  \ka kf -> runIdentity $ m (return . ka)
+                            (\o ki -> return $ kf o (runIdentity . ki))
+
+-- | Convert a 'YieldT' to an 'IteratorT'.
+toIterator :: Monad m => YieldT i o m a -> IteratorT i o m a
+toIterator (YieldT f) = IteratorT $ \ka kfr -> do
+  freef <- f
+  case freef of
+    Pure a     -> ka a
+    Yield ki o -> kfr o (\i -> runIteratorT (toIterator $ ki i) ka kfr)
+
+-- | Convert an 'IteratorT' to a 'YieldT'.
+toYield :: Monad m => IteratorT i o m a -> YieldT i o m a
+toYield (IteratorT k) = YieldT $ k (return . Pure)
+                                   (\o ki -> return $ Yield (YieldT . ki) o)
