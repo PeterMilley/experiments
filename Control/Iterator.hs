@@ -45,6 +45,7 @@ concern, construct your co-routines as 'IteratorT' and then convert to
 
 import Control.Monad (ap)
 import Control.Monad.Identity
+import Control.Monad.Trans.Class (MonadTrans(..))
 
 -- | A typeclass for functors which can suspend computation, yielding a value
 --   of type @o@, and wait to be resumed with a value of type @i@. Both
@@ -74,6 +75,9 @@ instance Monad m => Monad (YieldT i o m) where
   YieldT m >>= f = YieldT $ m >>= \v -> case v of
     Pure a     -> runYieldT (f a)
     Yield ki o -> return (Yield ((>>= f) . ki) o)
+
+instance MonadTrans (YieldT i o) where
+  lift = YieldT . fmap Pure
 
 -- | Perform a single step of a 'YieldT', returning 'Either' the final
 --   value of the computation, or an intermediate value and a continuation
@@ -111,6 +115,9 @@ instance Applicative (IteratorT i o m) where
 instance Monad (IteratorT i o m) where
   return = pure
   IteratorT fk >>= f = IteratorT $ \b fr -> fk (\d -> runIteratorT (f d) b fr) fr
+
+instance MonadTrans (YieldT i o) where
+  lift m = IteratorT $ \k _ -> m >>= k
 
 -- | Run an 'IteratorT' to completion by giving it two continuations, one
 --   for what to do with the final value and one for what to do with both
