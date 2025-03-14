@@ -116,7 +116,7 @@ instance Monad (IteratorT i o m) where
   return = pure
   IteratorT fk >>= f = IteratorT $ \b fr -> fk (\d -> runIteratorT (f d) b fr) fr
 
-instance MonadTrans (YieldT i o) where
+instance MonadTrans (IteratorT i o) where
   lift m = IteratorT $ \k _ -> m >>= k
 
 -- | Run an 'IteratorT' to completion by giving it two continuations, one
